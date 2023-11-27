@@ -161,8 +161,50 @@ class NeRFNetwork(NeRFRenderer):
             # torso color network
             self.torso_encoder, self.torso_in_dim = get_encoder('tiledgrid', input_dim=2, num_levels=16, level_dim=2, base_resolution=16, log2_hashmap_size=16, desired_resolution=2048)
             self.torso_net = MLP(self.torso_in_dim + self.torso_deform_in_dim + self.anchor_in_dim + self.individual_dim_torso, 4, 32, 3)
+        elif self.rad_torso:
+            # torso deform network
+            self.torso_deform_encoder, self.torso_deform_in_dim = get_encoder('frequency', input_dim=2, multires=10)
+            self.pose_encoder, self.pose_in_dim = get_encoder('frequency', input_dim=6, multires=4)
+            self.torso_deform_net = MLP(self.torso_deform_in_dim + self.pose_in_dim + self.individual_dim_torso, 2, 64, 3)
 
+            # torso color network
+            self.torso_encoder, self.torso_in_dim = get_encoder('tiledgrid', input_dim=2, num_levels=16, level_dim=2, base_resolution=16, log2_hashmap_size=16, desired_resolution=2048, interpolation='linear')
+            # self.torso_net = MLP(self.torso_in_dim + self.torso_deform_in_dim + self.pose_in_dim + self.individual_dim_torso + self.audio_dim, 4, 64, 3)
+            self.torso_net = MLP(self.torso_in_dim + self.torso_deform_in_dim + self.pose_in_dim + self.individual_dim_torso, 4, 32, 3)
 
+    def forward_rad_torso(self, x, poses, enc_a, c=None):
+        # x: [N, 2] in [-1, 1]
+        # head poses: [1, 6]
+        # c: [1, ind_dim], individual code
+
+        # test: shrink x
+        x = x * self.opt.torso_shrink
+
+        # deformation-based 
+        enc_pose = self.pose_encoder(poses)
+        enc_x = self.torso_deform_encoder(x)
+
+        if c is not None:
+            h = torch.cat([enc_x, enc_pose.repeat(x.shape[0], 1), c.repeat(x.shape[0], 1)], dim=-1)
+        else:
+            h = torch.cat([enc_x, enc_pose.repeat(x.shape[0], 1)], dim=-1)
+
+        dx = self.torso_deform_net(h)
+
+        x = (x + dx).clamp(-1, 1)
+
+        x = self.torso_encoder(x, bound=1)
+
+        # h = torch.cat([x, h, enc_a.repeat(x.shape[0], 1)], dim=-1)
+        h = torch.cat([x, h], dim=-1)
+
+        h = self.torso_net(h)
+
+        alpha = torch.sigmoid(h[..., :1])
+        color = torch.sigmoid(h[..., 1:])
+
+        return alpha, color, dx
+    
     def forward_torso(self, x, poses, c=None):
         # x: [N, 2] in [-1, 1]
         # head poses: [1, 4, 4]
@@ -319,6 +361,17 @@ class NeRFNetwork(NeRFRenderer):
                 {'params': self.torso_net.parameters(), 'lr': lr_net, 'weight_decay': wd},
                 {'params': self.torso_deform_net.parameters(), 'lr': lr_net, 'weight_decay': wd},
                 {'params': self.anchor_points, 'lr': lr_net, 'weight_decay': wd}
+            ]
+
+            if self.individual_dim_torso > 0:
+                params.append({'params': self.individual_codes_torso, 'lr': lr_net, 'weight_decay': wd})
+
+            return params
+        elif self.rad_torso:
+            params = [
+                {'params': self.torso_encoder.parameters(), 'lr': lr},
+                {'params': self.torso_net.parameters(), 'lr': lr_net, 'weight_decay': wd},
+                {'params': self.torso_deform_net.parameters(), 'lr': lr_net, 'weight_decay': wd},
             ]
 
             if self.individual_dim_torso > 0:

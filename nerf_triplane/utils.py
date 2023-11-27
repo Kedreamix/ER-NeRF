@@ -851,7 +851,7 @@ class Trainer(object):
             error_map = self.error_map[index] # [B, H * W]
 
             # [debug] uncomment to save and visualize error map
-            if self.global_step % 1001 == 0:
+            if (self.global_step + 1) % 1000 == 0:
                 tmp = error_map[0].view(256, 256).cpu().numpy()
                 # print(f'[write error map] {tmp.shape} {tmp.min()} ~ {tmp.max()}')
                 tmp = (tmp - tmp.min()) / (tmp.max() - tmp.min())

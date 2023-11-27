@@ -853,7 +853,7 @@ class Trainer(object):
             # [debug] uncomment to save and visualize error map
             if self.global_step % 1001 == 0:
                 tmp = error_map[0].view(256, 256).cpu().numpy()
-                print(f'[write error map] {tmp.shape} {tmp.min()} ~ {tmp.max()}')
+                # print(f'[write error map] {tmp.shape} {tmp.min()} ~ {tmp.max()}')
                 tmp = (tmp - tmp.min()) / (tmp.max() - tmp.min())
                 # cv2.imwrite(os.path.join(self.workspace, f'{self.global_step}.jpg'), (tmp * 255).astype(np.uint8))
                 os.makedirs(os.path.join(self.workspace, 'error_map'), exist_ok=True)

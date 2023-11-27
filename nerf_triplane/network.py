@@ -148,7 +148,8 @@ class NeRFNetwork(NeRFRenderer):
         self.aud_ch_att_net = MLP(self.in_dim, self.audio_dim, 64, 2)
 
         self.testing = False
-
+        
+        self.rad_torso = opt.rad_torso
         if self.torso:
             # torso deform network
             self.register_parameter('anchor_points', 

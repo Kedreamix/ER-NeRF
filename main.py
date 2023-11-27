@@ -73,7 +73,7 @@ if __name__ == '__main__':
     parser.add_argument('--smooth_lips', action='store_true', help="smooth the enc_a in a exponential decay way...")
 
     parser.add_argument('--torso', action='store_true', help="fix head and train torso")
-    parser.dad_argument('--rad_torso', action='store_true', help="fix head and train RAD-NeRF torso")
+    parser.add_argument('--rad_torso', action='store_true', help="fix head and train RAD-NeRF torso")
     parser.add_argument('--head_ckpt', type=str, default='', help="head model")
 
     ### GUI options

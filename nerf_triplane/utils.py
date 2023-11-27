@@ -246,7 +246,7 @@ def get_bg_coords(H, W, device):
 
 
 @torch.cuda.amp.autocast(enabled=False)
-def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, rect=None):
+def get_rays(poses, intrinsics, H, W, N=-1, error_map = None, patch_size=1, rect=None):
     ''' get rays
     Args:
         poses: [B, 4, 4], cam2world
@@ -302,7 +302,22 @@ def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, rect=None):
             inds = torch.where(mask.view(-1))[0] # [nzn]
             inds = inds.unsqueeze(0) # [1, N]
 
+        elif error_map is None:
+            inds = torch.randint(0, H*W, size=[N], device=device) # may duplicate
+            inds = inds.expand([B, N])
         else:
+
+            # weighted sample on a low-reso grid
+            inds_coarse = torch.multinomial(error_map.to(device), N, replacement=False) # [B, N], but in [0, 128*128)
+
+            # map to the original resolution with random perturb.
+            inds_x, inds_y = inds_coarse // 256, inds_coarse % 256 # `//` will throw a warning in torch 1.10... anyway.
+            sx, sy = H / 256, W / 256
+            inds_x = (inds_x * sx + torch.rand(B, N, device=device) * sx).long().clamp(max=H - 1)
+            inds_y = (inds_y * sy + torch.rand(B, N, device=device) * sy).long().clamp(max=W - 1)
+            inds = inds_x * W + inds_y
+
+            results['inds_coarse'] = inds_coarse # need this when updating error_map
             inds = torch.randint(0, H*W, size=[N], device=device) # may duplicate
             inds = inds.expand([B, N])
 
@@ -826,6 +841,32 @@ class Trainer(object):
         if self.flip_finetune_lips:
             self.opt.finetune_lips = not self.opt.finetune_lips
         
+        
+        # update error_map
+        if self.error_map is not None:
+            index = data['index'] # [B]
+            inds = data['inds_coarse'] # [B, N]
+
+            # take out, this is an advanced indexing and the copy is unavoidable.
+            error_map = self.error_map[index] # [B, H * W]
+
+            # [debug] uncomment to save and visualize error map
+            if self.global_step % 1001 == 0:
+                tmp = error_map[0].view(256, 256).cpu().numpy()
+                print(f'[write error map] {tmp.shape} {tmp.min()} ~ {tmp.max()}')
+                tmp = (tmp - tmp.min()) / (tmp.max() - tmp.min())
+                # cv2.imwrite(os.path.join(self.workspace, f'{self.global_step}.jpg'), (tmp * 255).astype(np.uint8))
+                os.makedirs(os.path.join(self.workspace, 'error_map'), exist_ok=True)
+                cv2.imwrite(os.path.join(self.workspace, 'error_map',f'{self.global_step}.jpg'), (tmp * 255).astype(np.uint8))
+            error = loss.detach().to(error_map.device) # [B, N], already in [0, 1]
+            
+            # ema update
+            ema_error = 0.1 * error_map.gather(1, inds) + 0.9 * error
+            error_map.scatter_(1, inds, ema_error)
+
+            # put back
+            self.error_map[index] = error_map
+        
         loss = loss.mean()
 
         # weights_sum loss
@@ -976,6 +1017,9 @@ class Trainer(object):
         # mark untrained region (i.e., not covered by any camera from the training dataset)
         if self.model.cuda_ray:
             self.model.mark_untrained_grid(train_loader._data.poses, train_loader._data.intrinsics)
+
+        # get a ref to error_map
+        self.error_map = train_loader._data.error_map
 
         for epoch in range(self.epoch + 1, max_epochs + 1):
             self.epoch = epoch

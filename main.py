@@ -117,7 +117,8 @@ if __name__ == '__main__':
     parser.add_argument('-l', type=int, default=10)
     parser.add_argument('-m', type=int, default=50)
     parser.add_argument('-r', type=int, default=10)
-
+    parser.add_argument('--loss', type=str, default='l2')
+    parser.add_argument('--error_map', action='store_true', help="use error map to sample rays")
     opt = parser.parse_args()
 
     if opt.O:
@@ -167,9 +168,19 @@ if __name__ == '__main__':
                 v.requires_grad = False
 
     
-    # print(model)
-
-    criterion = torch.nn.MSELoss(reduction='none')
+    # 测试使用不同的loss来判断结果进行运算
+    if opt.loss == 'l2':
+        # 设置 mse loss
+        criterion = torch.nn.MSELoss(reduction='none')
+    elif opt.loss == 'l1':
+        # MAE loss
+        criterion = torch.nn.L1Loss(reduction='none')
+    elif opt.loss == 'huber':
+        # Huber loss
+        criterion = torch.nn.HuberLoss(reduction='none', delta=0.1) # only available after torch 1.10 ?
+    elif opt.loss == 'smooth':
+        # smooth loss
+        criterion = torch.nn.SmoothL1Loss(reduction='none')
 
     if opt.test:
         

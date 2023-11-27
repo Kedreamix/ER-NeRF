@@ -263,8 +263,8 @@ class NeRFDataset_Test:
         index[0] = self.mirror_index(index[0])
 
         poses = self.poses[index].to(self.device) # [B, 4, 4]
-        
-        rays = get_rays(poses, self.intrinsics, self.H, self.W, self.num_rays, self.opt.patch_size)
+        error_map = None if self.error_map is None else self.error_map[index]
+        rays = get_rays(poses, self.intrinsics, self.H, self.W, self.num_rays, error_map, self.opt.patch_size)
 
         results['index'] = index # for ind. code
         results['H'] = self.H
@@ -588,7 +588,13 @@ class NeRFDataset:
         # calculate mean radius of all camera poses
         self.radius = self.poses[:, :3, 3].norm(dim=-1).mean(0).item()
         #print(f'[INFO] dataset camera poses: radius = {self.radius:.4f}, bound = {self.bound}')
-
+        
+        # initialize error_map
+        if self.training and self.opt.error_map:
+            self.error_map = torch.ones([self.images.shape[0], 256 * 256], dtype=torch.float) # [B, 128 * 128], flattened for easy indexing, fixed resolution...
+            self.error_map = self.error_map.to(self.device)
+        else:
+            self.error_map = None
         
         # [debug] uncomment to view all training poses.
         # visualize_poses(self.poses.numpy())
@@ -661,12 +667,14 @@ class NeRFDataset:
 
         poses = self.poses[index].to(self.device) # [B, 4, 4]
         
+        error_map = None if self.error_map is None else self.error_map[index]
+        
         if self.training and self.opt.finetune_lips:
             rect = self.lips_rect[index[0]]
             results['rect'] = rect
             rays = get_rays(poses, self.intrinsics, self.H, self.W, -1, rect=rect)
         else:
-            rays = get_rays(poses, self.intrinsics, self.H, self.W, self.num_rays, self.opt.patch_size)
+            rays = get_rays(poses, self.intrinsics, self.H, self.W, self.num_rays, error_map, self.opt.patch_size)
 
         results['index'] = index # for ind. code
         results['H'] = self.H
@@ -743,7 +751,11 @@ class NeRFDataset:
         # results['poses'] = convert_poses(poses) # [B, 6]
         # results['poses_matrix'] = poses # [B, 4, 4]
         results['poses'] = poses # [B, 4, 4]
-            
+        
+        if error_map is not None:
+            results['index'] = index
+            results['inds_coarse'] = rays['inds_coarse']
+        
         return results
 
     def dataloader(self):
